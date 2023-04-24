@@ -14,10 +14,17 @@
     - [Step 3. Service 만들기](#-step3-service-만들기-business-layer)
     - [Step 4. Controller 만들기](#-step4-controller-만들기-presentaion-layer)
 3. [MSA Thread](#-msa-thread)
+    - [thread class 구현 및 실행](#-thread-class-구현-및-실행)
+4. [Async 프로그래밍](#-async-프로그래밍)
+    - [Async 프로그래밍 설정](#-async-프로그래밍-설정)
+    - [Async Or Sync Service 구현](#-async-or-sync-service-구현)
+    - [RestController로 실행](#-restcontroller로-실행)
 ***
 ## 🔶 강의 Background
-- [수업메모](https://gist.github.com/carami/d3bb434cacf371d44e71538b93e6c212)
-- [수업시간 GITHUB - todo project](https://github.com/carami/koscom_2023)
+- [수업메모](https://gist.github.com/carami/94ec6cbe0517cc799185a71a4b6d1269)
+- [강의자료](https://drive.google.com/drive/folders/1W50_qdHFIklLIPQ94GdDvxtvaFKLIDyb)
+- [수업시간 GITHUB](https://github.com/carami/koscom_2023)
+  - 소스 작업내역 초기화 : 1차 `git reset --hard` 2차 `git clean -fd`
   - git url로 갖고오기 : `Ctrl + Shift + P` `Clone from Github`
   - git 업데이트 구문(terminal에서) : `git pull origin main`
 ***
@@ -116,5 +123,267 @@ public class TestController {
 ```
 ***
 ## 🔶 MSA Thread
+- 쓰레드 : 하나의 싱글쓰레드가 아니라 여러 수행기능을 함께 하는 것(서버스레드 기본 갯수 : 200개)
+  - 스레드가 너무 많을 때에는? 1) 쓰레드수를 늘리던지(=**스케일업**) 2) 서버수를 늘리던지(=**스케일아웃**)
+#### 🔹 thread class 구현 및 실행
+##### 구현하기 ver 1 : extends Thread
+```java
+package sample.thread;
+
+public class MyThread extends Thread { // Thread만 extend하면 Thread로 구현 가능함
+
+    @Override // Thread에서 Override 시킨 기능
+    public void run() {
+        //쓰레드 구현 부분
+        try {
+            sleep(100);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+##### 구현하기 ver 2 : implements Runnable
+```java
+package sample.thread;
+
+public class MyThread2 implements Runnable {
+    @Override
+    public void run() {
+        //쓰레드 구현 부분
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+}
+```
+##### 구현하기 ver 3 : synchronzied (thread 순차대로 실행)
+```java
+package sample.thread;
+
+public class Teacher {
+    public synchronized void answer1() {
+    }
+    public synchronized void answer2() {
+    }
+}
+```
+
+##### 실행하기 ver 1 : extends Thread
+```java
+public class ThreadTest1 {
+    public static void main(String[] args) {
+        MyThread my1 = new MyThread();
+        my1.start(); // thread 시작 함수
+        // run이라는 method는 내가 수행하면 안됨
+   }
+}
+```
+##### 실행하기 ver 2 : implements Runnable
+```java
+public class ThreadTest2 {
+    public static void main(String[] args) {
+        Thread t1 = new Thread(new MyThread2("kang"));
+        t1.start();
+    }
+}
+```
+##### 실행하기 ver 3 : DaemonThread
+```java
+public class DaemonThreadTest {
+    public static void main(String[] args) {
+        DaemonThread daemonThread = new DaemonThread();
+        daemonThread.setDaemon(true); // 데몬으로 셋팅함(데몬이면 main 끝나면 같이 끝남)
+        daemonThread.start();
+    }
+}
+```
+***
+## 🔶 Async 프로그래밍
+#### 🔹 Async 프로그래밍 설정
+- Configuration을 만들어줘야 Async 프로그래밍을 할 수 있음(강의자료의 35pg 참고)
+```java
+@Configuration
+@EnableAsync // Async를 Enable 할거에요
+public class AsyncConfig implements AsyncConfigurer {
+    // AsyncConfigurer : Spring Framework에서 제공하는 interface
+
+    @Bean(name = "taskExecutor")
+    public Executor taskExecutor() // Executor는 java.util.concurrent에서 제공
+    {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(50);
+        executor.setMaxPoolSize(50);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("AsyncThread-");
+        executor.initialize();
+        return executor;
+    }
+
+    @Override
+    @Nullable
+    public Executor getAsyncExecutor() {
+        return taskExecutor();
+    }
+
+    @Override
+    @Nullable
+    public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
+        return new SimpleAsyncUncaughtExceptionHandler();
+    }
+
+}
+```
+#### 🔹 Async or Sync Service 구현
+##### Step1. 세부 객체 작성
+```java
+@Service
+public class GetOneService {
+    public String getOne() {
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+        System.out.println("getOne : " + Thread.currentThread().getName());
+        return "one";
+    }
+
+    @Async
+    public Future<String> getAsyncOne() {
+        try {
+            Thread.sleep(2000);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+        System.out.println("getOne : " + Thread.currentThread().getName());
+        return new AsyncResult<>("one");
+    }
+}
+```
+##### Step2. 구현 객체 작성
+```java
+@Service
+@RequiredArgsConstructor
+public class AsyncTestService {
+    private final GetOneService getOneService; // 이 서비스에서 다른 서비스를 injection하는 방법
+    private final GetTwoService getTwoService;
+
+    @Autowired
+    @Qualifier("taskExecutor")
+    private Executor taskExecutor;
+
+    public String executeWithAsync() {
+        long start = System.nanoTime();
+
+        // 자체가 Async한 애는 Future객체를 얻어올 수 있음
+        Future<String> value1Future = getOneService.getAsyncOne();
+        Future<String> value2Future = getTwoService.getAsyncTwo();
+
+        while (!value1Future.isDone() || !value2Future.isDone()) {
+            try {
+                Thread.sleep(100);
+                System.out.print(".");
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        try {
+            String value1 = value1Future.get();
+            String value2 = value2Future.get();
+
+            System.out.println("value1 : " + value1);
+            System.out.println("value2 : " + value2);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        long end = System.nanoTime();
+        String str = "<p><b>executeWithAsync 걸린 시간 : </b>" + formatNanoseconds(end - start) + "</p>";
+        System.out.println(str);
+
+        return str;
+    }
+
+    public String executeWithCompletableFuture() {
+        long start = System.nanoTime();
+        CompletableFuture<String> value1Future = CompletableFuture.supplyAsync(() -> getOneService.getOne());
+        CompletableFuture<String> value2Future = CompletableFuture.supplyAsync(() -> getTwoService.getTwo());
+
+        CompletableFuture.allOf(value1Future, value2Future).join();
+
+        String value1 = value1Future.join();
+        String value2 = value2Future.join();
+
+        System.out.println("value1 : " + value1);
+        System.out.println("value2 : " + value2);
+
+        long end = System.nanoTime();
+        String str = "<p><b>executeWithCompletableFuture 걸린 시간 : </b>" + formatNanoseconds(end - start) + "</p>";
+        System.out.println(str);
+
+        return str;
+    }
+
+    public String executeWithoutAsync() {
+        long start = System.nanoTime();
+        String value1 = getOneService.getOne();
+        String value2 = getTwoService.getTwo();
+        long end = System.nanoTime();
+
+        System.out.println("value1 " + value1);
+        System.out.println("value2 " + value2);
+
+        String str = "<p><b>executeWithoutAsync 걸린 시간 : </b>" + formatNanoseconds(end - start) + "</p>";
+        System.out.println(str);
+
+        return str;
+    }
+
+    private String formatNanoseconds(long nanoSeconds) {
+        long hours = TimeUnit.NANOSECONDS.toHours(nanoSeconds);
+        long minutes = TimeUnit.NANOSECONDS.toMinutes(nanoSeconds) % 60;
+        long seconds = TimeUnit.NANOSECONDS.toSeconds(nanoSeconds) % 60;
+        long millis = TimeUnit.NANOSECONDS.toMillis(nanoSeconds) % 1000;
+        long micros = TimeUnit.NANOSECONDS.toMicros(nanoSeconds) % 1000;
+
+        return String.format("%02d:%02d:%02d.%03d,%03d", hours, minutes, seconds, millis, micros);
+    }
+}
+```
+#### 🔹 RestController로 실행
+```java
+@RestController
+@RequiredArgsConstructor
+public class TestController {
+
+    private final AsyncTestService asyncTestService;
+
+    @GetMapping("/test1")
+    public String test1() {
+        String str = "<h1># test1</h1>";
+
+        return str + asyncTestService.executeWithoutAsync();
+    }
+
+    @GetMapping("/test2")
+    public String test2() {
+        String str = "<h1># test2</h1>";
+        return str + asyncTestService.executeWithoutAsync();
+    }
+
+    @GetMapping("/test3")
+    public String test3() {
+        String str = "<h1># test3</h1>";
+        str = str + asyncTestService.executeWithAsync();
+        System.out.println("##########test3 끝");
+        return str;
+    }
+}
+```
 ***
 [맨 위로 가기](#top)
